@@ -29,6 +29,7 @@ type Account struct {
 	nonce          uint64
 	funded         bool
 	reusableNonces []uint64
+	mu sync.RWMutex
 }
 
 // Creates a new account with the given private key.
@@ -71,7 +72,15 @@ func (a *Account) PrivateKey(ctx context.Context) *ecdsa.PrivateKey {
 
 // Returns the nonce of the account
 func (a *Account) Nonce(ctx context.Context) uint64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	return a.nonce
+}
+
+func (a *Account) IncrementNonce() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.nonce++
 }
 
 // Structure to control accounts used by the tests
@@ -94,6 +103,7 @@ type AccountPool struct {
 
 	latestBlockNumber uint64
 	pendingTxsCache   *uint64
+	manualNonceTracking bool
 }
 
 // Creates a new account pool with the given funding private key.
@@ -101,7 +111,7 @@ type AccountPool struct {
 // The funding amount is the amount of ether to send to each account.
 // The client is used to interact with the network to get account information
 // and also to send transactions to fund accounts.
-func NewAccountPool(ctx context.Context, client *ethclient.Client, fundingPrivateKey *ecdsa.PrivateKey, fundingAmount *big.Int) (*AccountPool, error) {
+func NewAccountPool(ctx context.Context, client *ethclient.Client, fundingPrivateKey *ecdsa.PrivateKey, fundingAmount *big.Int, manualNonceTracking bool) (*AccountPool, error) {
 	if fundingPrivateKey == nil {
 		log.Fatal().
 			Msg("fundingPrivateKey cannot be nil")
@@ -156,6 +166,7 @@ func NewAccountPool(ctx context.Context, client *ethclient.Client, fundingPrivat
 		accountsPositions:   make(map[common.Address]int),
 		latestBlockNumber:   latestBlockNumber,
 		clientRateLimiter:   rate.NewLimiter(rate.Every(50*time.Millisecond), 1),
+		manualNonceTracking: manualNonceTracking,
 	}, nil
 }
 
@@ -710,7 +721,7 @@ func (ap *AccountPool) Nonces(ctx context.Context) map[common.Address]uint64 {
 		if len(account.reusableNonces) > 0 {
 			nonces[account.address] = account.reusableNonces[len(account.reusableNonces)-1]
 		} else {
-			nonces[account.address] = account.nonce
+			nonces[account.address] = account.Nonce(ctx)
 		}
 	}
 	return nonces
@@ -757,7 +768,7 @@ func (ap *AccountPool) Next(ctx context.Context) (Account, error) {
 		account.nonce = ap.accounts[ap.currentAccountIndex].reusableNonces[0]
 		ap.accounts[ap.currentAccountIndex].reusableNonces = ap.accounts[ap.currentAccountIndex].reusableNonces[1:]
 	} else {
-		ap.accounts[ap.currentAccountIndex].nonce++
+		ap.accounts[ap.currentAccountIndex].IncrementNonce()
 	}
 
 	// move current account index to next account

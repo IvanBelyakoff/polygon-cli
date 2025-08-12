@@ -306,7 +306,7 @@ func initializeLoadTestParams(ctx context.Context, c *ethclient.Client) error {
 	preFundSendingAccounts := *inputLoadTestParams.PreFundSendingAccounts
 	fundingAmount := inputLoadTestParams.AccountFundingAmount
 	sendingAccountsFile := *inputLoadTestParams.SendingAccountsFile
-	accountPool, err = NewAccountPool(ctx, c, privateKey, fundingAmount)
+	accountPool, err = NewAccountPool(ctx, c, privateKey, fundingAmount, *inputLoadTestParams.FireAndForget)
 	if err != nil {
 		log.Error().Err(err).Msg("Unable to create account pool")
 		return fmt.Errorf("unable to create account pool. %w", err)
@@ -920,7 +920,13 @@ func mainLoop(ctx context.Context, c *ethclient.Client, rpc *ethrpc.Client) erro
 							}
 						}
 					}
+				} else {
+					if *inputLoadTestParams.FireAndForget {
+						// increment the nonce for the next transaction
+						account.IncrementNonce()
+					}
 				}
+
 				log.Trace().
 					Int64("routineID", routineID).
 					Int64("requestID", requestID).
